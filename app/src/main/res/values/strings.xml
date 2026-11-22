@@ -2824,6 +2824,7 @@ For the smoothest playback experience, you can use an external player like VLC. 
     <string name="home_orientation_portrait">Portrait</string>
     <string name="home_orientation_landscape">Landscape</string>
     <string name="home_storage_format">%.2f GB</string>
+    <string name="home_storage_time_unavailable">Estimate unavailable</string>
 
     <!-- HTTP methods -->
     <string name="http_get" translatable="false">GET</string>

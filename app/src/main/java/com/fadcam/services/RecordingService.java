@@ -2377,7 +2377,6 @@ public class RecordingService extends Service {
                 // Reset sensor data provider singleton so next recording starts fresh
                 com.fadcam.sensors.SensorDataProvider.resetInstance();
                 sensorDataProvider = null;
-                weatherService = null;
                 FLog.d(TAG, "All extended sensor providers cleaned up");
 
                 // Also destroy shared WatermarkManager
@@ -6942,7 +6941,7 @@ public class RecordingService extends Service {
                     return;
                 }
                 androidx.documentfile.provider.DocumentFile pickedDir = resolveSafRecordingVideoDir(
-                        customUriString, false);
+                        customUriString);
                 if (pickedDir == null || !pickedDir.canWrite()) {
                     FLog.e(TAG, "Cannot write to selected custom directory");
                     Toast.makeText(this, getString(R.string.toast_cannot_write_custom_dir), Toast.LENGTH_LONG).show();
