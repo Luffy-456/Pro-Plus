@@ -98,6 +98,7 @@ android {
         }
         
         create("proPlus") {
+            matchingFallbacks += listOf("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
