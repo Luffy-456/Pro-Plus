@@ -88,11 +88,9 @@ import com.fadcam.RecordingControlIntents;
 import com.fadcam.RecordingState;
 import com.fadcam.SharedPreferencesManager;
 import com.fadcam.Utils;
-import com.fadcam.VideoCodec;
 import com.fadcam.services.RecordingService;
 import com.fadcam.services.TorchService;
 import com.fadcam.dualcam.service.DualCameraRecordingService;
-import com.fadcam.streaming.RemoteStreamManager;
 import com.fadcam.ui.helpers.HomeFragmentHelper;
 import com.fadcam.ui.components.ModeSwitcherComponent;
 import com.fadcam.utils.DebouncedRunnable;
@@ -128,7 +126,6 @@ import java.util.concurrent.Executors;
 public class HomeFragment extends BaseFragment {
 
     private static final String TAG = "HomeFragment";
-    private static final long UPDATE_CHECK_INTERVAL_MS = 60L * 60L * 1000L;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private static final String ELAPSED_ALIGNMENT_RESULT_KEY = "home_elapsed_alignment_picker";
     private static final String ELAPSED_DISPLAY_RESULT_KEY = "home_elapsed_display_picker";
@@ -1479,102 +1476,6 @@ public class HomeFragment extends BaseFragment {
             showUnsupportedHardwareMessage();
         }
 
-        // ----- Update Check (Atom feed) -----
-        if (
-            com.fadcam.SharedPreferencesManager.isAutoUpdateCheckEnabled(
-                requireContext()
-            ) &&
-            DeviceHelper.isInternetAvailable(requireContext())
-        ) {
-            if (
-                getParentFragmentManager().findFragmentByTag(
-                    "UpdateAvailableBottomSheet"
-                ) ==
-                null
-            ) {
-                ExecutorService updateExecutor =
-                    Executors.newSingleThreadExecutor();
-                updateExecutor.execute(() -> {
-                    try {
-                        // Rate-limit: GitHub feed is re-fetched at most once an
-                        // hour (epoch-ms timestamp persisted at each check).
-                        long now = System.currentTimeMillis();
-                        if (now - sharedPreferencesManager.getLong(
-                                Constants.LAST_UPDATE_CHECK_KEY, 0L)
-                                < UPDATE_CHECK_INTERVAL_MS) {
-                            return;
-                        }
-                        String currentVersion = getAppVersionForUpdates();
-                        com.fadcam.services.UpdateCheckService.UpdateCheckResult result =
-                            com.fadcam.services.UpdateCheckService.checkForUpdate(currentVersion);
-
-                        if (result.errorOccurred) {
-                            FLog.w(TAG, "Update check returned error, skipping UI");
-                            return;
-                        }
-                        sharedPreferencesManager.putLong(
-                            Constants.LAST_UPDATE_CHECK_KEY, System.currentTimeMillis());
-
-                        // Auto-popup on app open:
-                        //  - BETA app (package com.fadcam.beta): show the BETA update
-                        //    sheet DIRECTLY so beta testers see urgent releases
-                        //    immediately (badge-only was too quiet for them).
-                        //  - Stable app: only stable updates pop (existing behavior).
-                        //    (On the beta app a newer STABLE still pops if no beta
-                        //    is available — e.g. current beta < next stable.)
-                        final boolean isBetaApp =
-                                com.fadcam.BuildConfig.APPLICATION_ID.endsWith(".beta");
-                        FLog.d("UpdateCheck", "Home check: package="
-                                + com.fadcam.BuildConfig.APPLICATION_ID
-                                + " isBetaApp=" + isBetaApp
-                                + " current=" + currentVersion
-                                + " stable=" + result.stableVersion + "(" + result.hasStable + ")"
-                                + " beta=" + result.betaVersion + "(" + result.hasBeta + ")"
-                                + " pro=" + result.proVersion + "(" + result.hasPro + ")");
-                        if ((isBetaApp && result.hasBeta) || (!isBetaApp && result.hasStable)) {
-                            requireActivity().runOnUiThread(() -> {
-                                if (isAdded() && !isDetached()
-                                        && getActivity() != null
-                                        && !getActivity().isFinishing()) {
-                                    try {
-                                        if (isBetaApp && result.hasBeta) {
-                                            BetaUpdateBottomSheet.newInstance(
-                                                    result.betaVersion, result.betaUrl,
-                                                    currentVersion
-                                            ).show(getParentFragmentManager(),
-                                                   "BetaUpdateSheet");
-                                        } else {
-                                            UpdateAvailableBottomSheet.newInstance(
-                                                result.stableVersion, "", result.stableUrl
-                                            ).show(getParentFragmentManager(),
-                                                   "UpdateAvailableBottomSheet");
-                                        }
-                                    } catch (IllegalStateException e) {
-                                        FLog.e(TAG, "Cannot show update sheet", e);
-                                    }
-                                }
-                            });
-                        }
-
-                        // Update hamburger badge — show when update available, hide when not
-                        requireActivity().runOnUiThread(() -> updateUpdateBadge(result.hasAnyUpdate()));
-
-                    } catch (Exception e) {
-                        FLog.e(TAG, "Update check failed", e);
-                    }
-                });
-            }
-        } else {
-            FLog.i(
-                TAG,
-                "Auto update check is disabled or no internet available, not showing update bottom sheet"
-            );
-            // Hide badge in case it was previously shown
-            if (hamburgerBadgeDot != null) {
-                hamburgerBadgeDot.setVisibility(View.GONE);
-            }
-        }
-        // ----- Update Check Bottom Sheet End -----
     }
 
     /**
@@ -5465,7 +5366,6 @@ public class HomeFragment extends BaseFragment {
         boolean needsLocation = sharedPreferencesManager.isSpeedEnabled()
                 || sharedPreferencesManager.isAltitudeEnabled()
                 || sharedPreferencesManager.isAccuracyEnabled()
-                || sharedPreferencesManager.isWeatherEnabled()
                 || sharedPreferencesManager.isLocalisationEnabled()
                 || sharedPreferencesManager.isLocationEmbeddingEnabled()
                 || sharedPreferencesManager.isUtmEnabled();
@@ -5505,18 +5405,6 @@ public class HomeFragment extends BaseFragment {
         if (selectedCam == CameraType.DUAL_PIP) {
             startDualRecording();
             return;
-        }
-
-        // Check if codec is HEVC - browsers don't support HEVC for HLS live streaming
-        // Only validate if streaming is actually enabled (server running)
-        if (RemoteStreamManager.getInstance().isStreamingEnabled()) {
-            VideoCodec selectedCodec = sharedPreferencesManager.getVideoCodec();
-            if (selectedCodec == VideoCodec.HEVC) {
-                // HEVC is not browser-compatible for HLS streaming
-                // Show Material Dialog with option to auto-switch to AVC
-                showCodecIncompatibilityDialog();
-                return; // Block recording start
-            }
         }
 
         // Force reset recording state if service is not running
@@ -5672,41 +5560,6 @@ public class HomeFragment extends BaseFragment {
         intent.setAction(Constants.INTENT_ACTION_SWAP_DUAL_CAMERAS);
         requireActivity().startService(intent);
         vibrateTouch();
-    }
-
-    /**
-     * Shows a Material Dialog when HEVC codec is selected but live streaming requires AVC.
-     * Offers user to automatically switch to AVC codec and start recording.
-     */
-    private void showCodecIncompatibilityDialog() {
-        if (getContext() == null) return;
-
-        new MaterialAlertDialogBuilder(getContext())
-                .setTitle(getString(R.string.codec_hevc_incompatible_title))
-                .setMessage(getString(R.string.codec_hevc_incompatible_message))
-                .setPositiveButton(getString(R.string.codec_switch_and_record), (dialog, which) -> {
-                    // Auto-switch codec to AVC
-                    FLog.d(TAG, "User requested auto-switch from HEVC to AVC codec");
-                    sharedPreferencesManager.sharedPreferences.edit()
-                        .putString(Constants.PREF_VIDEO_CODEC, VideoCodec.AVC.toString())
-                        .apply();
-                    
-                    // Show confirmation toast
-                    Toast.makeText(
-                        getContext(),
-                        getString(R.string.codec_switched_to_h264),
-                        Toast.LENGTH_SHORT
-                    ).show();
-                    
-                    // Proceed with recording start
-                    proceedWithRecordingStart();
-                })
-                .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
-                    FLog.d(TAG, "User cancelled recording due to codec incompatibility");
-                    dialog.dismiss();
-                })
-                .setCancelable(true)
-                .show();
     }
 
     /**
@@ -6677,20 +6530,7 @@ public class HomeFragment extends BaseFragment {
         // Adjust available bytes for recording
         long adjustedAvailable;
         if (isRecording() || isPaused()) {
-            // Check if streaming is active in STREAM_ONLY mode - if so, don't deduct estimated bytes
-            boolean isStreamOnlyMode = false;
-            try {
-                boolean serverActive = RemoteStreamManager.getInstance().isStreamingEnabled();
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode mode =
-                    sharedPreferencesManager.getStreamingMode();
-                isStreamOnlyMode = serverActive &&
-                    (mode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-            } catch (Exception e) {
-                FLog.e(TAG, "Error checking streaming mode for storage calculation", e);
-            }
-            adjustedAvailable = isStreamOnlyMode
-                ? storageInfo.availableBytes
-                : storageInfo.availableBytes - estimatedBytesUsed;
+            adjustedAvailable = storageInfo.availableBytes - estimatedBytesUsed;
         } else {
             adjustedAvailable = storageInfo.availableBytes;
         }
@@ -6841,18 +6681,7 @@ public class HomeFragment extends BaseFragment {
         final boolean showLiveRemaining = isRecording() || isPaused();
         final String finalTimeLeftText;
         if (showLiveRemaining) {
-            // Check if streaming is active in STREAM_ONLY mode - if so, show "Unlimited"
-            boolean isStreamOnlyMode = false;
-            try {
-                boolean serverActive = RemoteStreamManager.getInstance().isStreamingEnabled();
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode mode =
-                    sharedPreferencesManager.getStreamingMode();
-                isStreamOnlyMode = serverActive &&
-                    (mode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-            } catch (Exception e) {
-                FLog.e(TAG, "Error checking streaming mode in camera recording UI", e);
-            }
-            finalTimeLeftText = isStreamOnlyMode ? "Unlimited" : formatRemainingTime(days, hours, minutes, seconds);
+            finalTimeLeftText = formatRemainingTime(days, hours, minutes, seconds);
         } else {
             finalTimeLeftText = selectedEstimate;
         }

@@ -431,7 +431,6 @@ public class HomeSidebarFragment extends DialogFragment {
 
         applyMiniAppVisibility(view);
 
-        setupUpdateCards(view);
     }
 
     /**
@@ -659,72 +658,4 @@ public class HomeSidebarFragment extends DialogFragment {
         return R.style.CustomSideSheetDialogTheme;
     }
 
-    private void setupUpdateCards(@NonNull View view) {
-        android.widget.LinearLayout section = view.findViewById(R.id.update_available_section);
-        if (section == null) return;
-        com.fadcam.services.UpdateCheckService.UpdateCheckResult r =
-                com.fadcam.services.UpdateCheckService.getLastResult();
-        if (r == null || !r.hasAnyUpdate()) { section.setVisibility(View.GONE); return; }
-        section.setVisibility(View.VISIBLE);
-
-        String cur = getAppVersion();
-
-        if (r.hasStable) setupCard(view, R.id.card_update_stable, R.id.tv_stable_version,
-                cur, r.stableVersion, () -> {
-                    UpdateAvailableBottomSheet.newInstance(r.stableVersion, "", r.stableUrl)
-                            .show(getParentFragmentManager(), "UpdateSheet");
-                    dismiss();
-                });
-        else hideCard(view, R.id.card_update_stable);
-
-        if (r.hasBeta) setupCard(view, R.id.card_update_beta, R.id.tv_beta_version,
-                cur, r.betaVersion, () -> {
-                    BetaUpdateBottomSheet.newInstance(r.betaVersion, r.betaUrl, cur)
-                            .show(getParentFragmentManager(), "BetaSheet");
-                    dismiss();
-                });
-        else hideCard(view, R.id.card_update_beta);
-
-        if (r.hasPro) setupCard(view, R.id.card_update_pro, R.id.tv_pro_version,
-                cur, r.proVersion, () -> {
-                    ProUpdateBottomSheet.newInstance(r.proVersion, r.proUrl, cur)
-                            .show(getParentFragmentManager(), "ProSheet");
-                    dismiss();
-                });
-        else hideCard(view, R.id.card_update_pro);
-    }
-
-    private void setupCard(View v, int cardId, int verId, String cur, String latest, Runnable onClick) {
-        View c = v.findViewById(cardId);
-        android.widget.TextView t = v.findViewById(verId);
-        if (c == null || t == null) return;
-        String text = "v" + cur + "  >>  v" + latest;
-        android.text.SpannableString sp = new android.text.SpannableString(text);
-        int curEnd = ("v" + cur).length();
-        
-        // Determine colors based on card type
-        int currentColor = 0xFFFF5252; // Default red for current version
-        int newColor = 0xFF66BB6A;     // Default green for new version
-        
-        if (cardId == R.id.card_update_pro) {
-            currentColor = 0xFFFFFFFF;  // White for Pro current version
-            newColor = 0xFFFFD700;      // Gold for Pro new version
-        }
-        
-        sp.setSpan(new android.text.style.ForegroundColorSpan(currentColor), 0, curEnd, 0);
-        sp.setSpan(new android.text.style.ForegroundColorSpan(newColor), curEnd, text.length(), 0);
-        t.setText(sp);
-        c.setVisibility(View.VISIBLE);
-        c.setOnClickListener(ignored -> onClick.run());
-        if (c instanceof android.view.ViewGroup && ((android.view.ViewGroup)c).getChildCount() > 0) {
-            com.fadcam.utils.ShimmerEffectHelper.applyShimmerEffect(((android.view.ViewGroup)c).getChildAt(0));
-        }
-    }
-
-    private void hideCard(View v, int cardId) { View c = v.findViewById(cardId); if (c != null) c.setVisibility(View.GONE); }
-
-    private String getAppVersion() {
-        try { return requireActivity().getPackageManager().getPackageInfo(requireActivity().getPackageName(), 0).versionName; }
-        catch (Exception e) { return ""; }
-    }
 }

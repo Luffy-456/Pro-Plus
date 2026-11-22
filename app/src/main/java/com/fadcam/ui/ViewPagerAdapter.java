@@ -33,13 +33,11 @@ public class ViewPagerAdapter extends FragmentStateAdapter {
             case 1:
                 return new RecordsFragment();
             case 2:
-                return new RemoteFragment();
-            case 3:
                 return new FaditorMiniFragment();
-            case 4:
+            case 3:
                 // Phase 1: Use new SettingsHomeFragment (legacy fragment accessible from inside)
                 return new SettingsHomeFragment();
-            case 5:
+            case 4:
                 return new ForensicIntelligenceFragment();
             default:
                 return new HomeFragment();
@@ -67,6 +65,6 @@ public class ViewPagerAdapter extends FragmentStateAdapter {
 
     @Override
     public int getItemCount() {
-        return 6; // Home, Records, Remote, Faditor Mini, Settings, Lab
+        return 5; // Home, Records, Faditor Mini, Settings, Lab
     }
 }

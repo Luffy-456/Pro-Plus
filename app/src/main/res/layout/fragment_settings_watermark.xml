@@ -744,45 +744,6 @@
                         android:layout_height="52dp"
                         android:layout_gravity="center_vertical" />
                 </LinearLayout>
-                <View style="@style/SettingsDivider" />
-
-                <!-- Weather Toggle Row -->
-                <LinearLayout
-                    android:id="@+id/row_weather"
-                    style="@style/SettingsGroupRow">
-                    <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:layout_marginEnd="16dp"
-                        android:src="@drawable/ic_location"
-                        android:tint="@android:color/darker_gray"/>
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/watermark_weather_title"
-                            android:textStyle="bold"
-                            android:textSize="15sp"
-                            android:textColor="?attr/colorHeading"/>
-                        <TextView
-                            android:id="@+id/value_weather"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginEnd="12dp"
-                            android:text="@string/watermark_weather_off"
-                            android:textColor="@android:color/darker_gray"
-                            android:textSize="12sp"/>
-                    </LinearLayout>
-                    <com.fadcam.ui.AvatarToggleView
-                        android:id="@+id/switch_weather"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
-                        android:layout_gravity="center_vertical" />
-                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

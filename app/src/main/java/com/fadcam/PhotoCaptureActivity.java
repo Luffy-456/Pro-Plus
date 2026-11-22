@@ -26,7 +26,6 @@ import androidx.exifinterface.media.ExifInterface;
 
 import com.fadcam.dualcam.service.DualCameraRecordingService;
 import com.fadcam.audio.NoiseMonitor;
-import com.fadcam.network.WeatherService;
 import com.fadcam.sensors.SensorDataProvider;
 import com.fadcam.ui.LocationHelper;
 import com.fadcam.utils.PhotoStorageHelper;
@@ -246,29 +245,8 @@ public class PhotoCaptureActivity extends ComponentActivity {
         android.os.Handler h = new android.os.Handler(android.os.Looper.myLooper());
         org.osmdroid.util.GeoPoint pt = lh.getCurrentLocation();
         if (pt != null) {
-            String format = prefs.getWatermarkLocationFormat();
-            if ("address".equals(format)) {
-                sb.append("Lat: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLatitude()))
-                  .append(", Long: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLongitude()));
-                com.fadcam.services.LocationGeocoder geocoder = null;
-                try {
-                    geocoder = new com.fadcam.services.LocationGeocoder();
-                    final com.fadcam.services.LocationGeocoder finalGeocoder = geocoder;
-                    geocoder.geocodeAsync(pt.getLatitude(), pt.getLongitude(), result -> {
-                        if (result != null && !result.isEmpty()) {
-                            if (sb.length() > 0) sb.append("\n");
-                            sb.append(result.formatted);
-                        }
-                        finalGeocoder.shutdown();
-                    });
-                } catch (Exception e) {
-                    if (geocoder != null) geocoder.shutdown();
-                }
-                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-            } else {
-                sb.append("Lat: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLatitude()))
-                  .append(", Long: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLongitude()));
-            }
+            sb.append("Lat: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLatitude()))
+              .append(", Long: ").append(String.format(java.util.Locale.US, "%.4f", pt.getLongitude()));
             // Grab the REAL raw fix (carries speed/altitude) before stopping.
             android.location.Location rawFix = lh.getRawLocation();
             lh.stopLocationUpdates();
@@ -280,29 +258,22 @@ public class PhotoCaptureActivity extends ComponentActivity {
                     sb.append(utm);
                 }
             }
-            gatherSensorsAndFinish(prefs, sb, latch, pt, rawFix);
+            gatherSensorsAndFinish(prefs, sb, latch, rawFix);
         } else if (System.currentTimeMillis() < deadline) {
             h.postDelayed(() -> pollLocation(lh, deadline, prefs, sb, latch), 500);
         } else {
             lh.stopLocationUpdates();
-            gatherSensorsAndFinish(prefs, sb, latch, null, null);
+            gatherSensorsAndFinish(prefs, sb, latch, null);
         }
     }
 
     private void gatherSensorsAndFinish(SharedPreferencesManager prefs, StringBuilder sb,
                                          java.util.concurrent.CountDownLatch latch) {
-        gatherSensorsAndFinish(prefs, sb, latch, null, null);
+        gatherSensorsAndFinish(prefs, sb, latch, null);
     }
 
     private void gatherSensorsAndFinish(SharedPreferencesManager prefs, StringBuilder sb,
                                          java.util.concurrent.CountDownLatch latch,
-                                         org.osmdroid.util.GeoPoint liveLocation) {
-        gatherSensorsAndFinish(prefs, sb, latch, liveLocation, null);
-    }
-
-    private void gatherSensorsAndFinish(SharedPreferencesManager prefs, StringBuilder sb,
-                                         java.util.concurrent.CountDownLatch latch,
-                                         org.osmdroid.util.GeoPoint liveLocation,
                                          android.location.Location rawFix) {
         try {
             if (prefs.isSpeedEnabled() || prefs.isAltitudeEnabled() || prefs.isCompassEnabled()) {
@@ -326,20 +297,6 @@ public class PhotoCaptureActivity extends ComponentActivity {
                 try { Thread.sleep(300); } catch (InterruptedException ignored) {}
                 if (nm.isRunning()) { if (sb.length() > 0) sb.append("\n"); sb.append("Noise: ").append(nm.getReadableDb()); }
                 com.fadcam.audio.NoiseMonitor.resetInstance();
-            }
-            if (prefs.isWeatherEnabled()) {
-                com.fadcam.network.WeatherService ws = com.fadcam.network.WeatherService.getInstance(getApplicationContext());
-                String w = ws.getCurrentWeather();
-                if ((w == null || w.isEmpty()) && liveLocation != null) {
-                    // Use WeatherService callback instead of Thread.sleep (which blocks Looper)
-                    final java.util.concurrent.CountDownLatch weatherLatch = new java.util.concurrent.CountDownLatch(1);
-                    ws.fetchWeather(liveLocation, (weather, wind) -> weatherLatch.countDown());
-                    try { weatherLatch.await(4, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
-                    w = ws.getCurrentWeather();
-                }
-                if (w != null && !w.isEmpty()) { if (sb.length() > 0) sb.append("\n"); sb.append(w); }
-                String wi = ws.getCurrentWind();
-                if (wi != null && !wi.isEmpty()) { if (sb.length() > 0) sb.append("\n"); sb.append("Wind: ").append(wi); }
             }
         } finally {
             latch.countDown();

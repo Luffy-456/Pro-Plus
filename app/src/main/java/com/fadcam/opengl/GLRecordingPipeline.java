@@ -476,20 +476,6 @@ public class GLRecordingPipeline {
     // ════════════════════════════════════════════════════════════════════
 
     private int getEffectiveVideoBitrate(Context context) {
-        boolean isStreaming = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-        if (isStreaming) {
-            android.content.SharedPreferences fadcamPrefs =
-                    context.getSharedPreferences("FadCamPrefs", Context.MODE_PRIVATE);
-            int streamBitrate = fadcamPrefs.getInt("stream_bitrate", -1);
-            if (streamBitrate > 0) {
-                FLog.i(TAG, "[STREAM PRESET] GL encoder bitrate enforced: " + (streamBitrate / 1_000_000)
-                        + " Mbps");
-                return streamBitrate;
-            }
-            FLog.w(TAG, "[STREAM PRESET] GL encoder missing stream_bitrate, using default HIGH (5 Mbps)");
-            return 5_000_000;
-        }
-
         return com.fadcam.SharedPreferencesManager.getInstance(context).getCurrentBitrate();
     }
 
@@ -1187,15 +1173,11 @@ public class GLRecordingPipeline {
             FLog.w(TAG, "KEY_PREPEND_HEADER_TO_SYNC_FRAMES not supported on this device");
         }
 
-        // ESSENTIAL: Bitrate mode — CBR for streaming (hard bandwidth cap), VBR for local recording (quality)
+        // Use variable bitrate for local recording quality.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
             try {
-                boolean isStreaming = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-                int bitrateMode = isStreaming
-                    ? MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
-                    : MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR;
-                format.setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode);
-                FLog.i(TAG, "[ENCODER] CBR=" + isStreaming + " | bitrate=" + (videoBitrate/1_000_000) + "Mbps | fps=" + videoFramerate);
+                format.setInteger(MediaFormat.KEY_BITRATE_MODE,
+                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
             } catch (Exception e) {
                 FLog.w(TAG, "Bitrate mode not supported", e);
             }
@@ -1270,14 +1252,11 @@ public class GLRecordingPipeline {
             }
         }
 
-        // Set bitrate mode — CBR for streaming (hard bandwidth cap), VBR for local recording (quality)
+        // Use variable bitrate for local recording quality.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
             try {
-                boolean isStreaming = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-                int bitrateMode = isStreaming
-                    ? MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
-                    : MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR;
-                format.setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode);
+                format.setInteger(MediaFormat.KEY_BITRATE_MODE,
+                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
             } catch (Exception e) {
                 FLog.w(TAG, "Bitrate mode not supported", e);
             }

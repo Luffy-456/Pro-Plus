@@ -68,7 +68,7 @@ android {
             applicationIdSuffix = ".beta"
             isDebuggable = true
             versionNameSuffix = "-beta10.6" // Increment the beta version suffix for each release. Use `beta1` for the first beta release, then `beta2`, etc.
-            resValue("string", "app_name", "FadCam Beta")
+            resValue("string", "app_name", "Activity")
         }
         
         release {
@@ -111,7 +111,7 @@ android {
             }
             versionNameSuffix = "-Pro+"
             // Custom app name via gradle property
-            val customAppName = project.findProperty("customAppName")?.toString() ?: "FadCam Pro+"
+            val customAppName = project.findProperty("customAppName")?.toString() ?: "Activity"
             resValue("string", "app_name", customAppName)
         }
     }
@@ -122,17 +122,17 @@ android {
         create("notesPro") {
             dimension = "pro"
             applicationIdSuffix = ".notes"
-            resValue("string", "app_name", "Notes")
+            resValue("string", "app_name", "Activity")
         }
         create("calcPro") {
             dimension = "pro"
             applicationIdSuffix = ".calc"
-            resValue("string", "app_name", "Calculator")
+            resValue("string", "app_name", "Activity")
         }
         create("weatherPro") {
             dimension = "pro"
             applicationIdSuffix = ".weather"
-            resValue("string", "app_name", "Weather")
+            resValue("string", "app_name", "Activity")
         }
         create("default") {
             dimension = "pro"

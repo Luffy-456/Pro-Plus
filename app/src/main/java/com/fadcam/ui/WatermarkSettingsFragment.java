@@ -234,23 +234,6 @@ public class WatermarkSettingsFragment extends Fragment {
                 }
             });
         }
-        com.fadcam.ui.AvatarToggleView switchWeather = view.findViewById(R.id.switch_weather);
-        if (switchWeather != null) {
-            switchWeather.setChecked(prefs.isWeatherEnabled());
-            switchWeather.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                if (isChecked && !prefs.isNetworkWarningShown()) {
-                    showNetworkWarningDialog(() -> {
-                        prefs.setWeatherEnabled(true);
-                        prefs.setNetworkWarningShown(true);
-                        refreshExtendedRowValues();
-                    });
-                } else {
-                    prefs.setWeatherEnabled(isChecked);
-                    refreshExtendedRowValues();
-                }
-            });
-        }
-
         // Make whole row clickable for toggle rows
         View rowSpeed = view.findViewById(R.id.row_speed);
         if (rowSpeed != null) rowSpeed.setOnClickListener(v -> {
@@ -268,11 +251,6 @@ public class WatermarkSettingsFragment extends Fragment {
         if (rowNoise != null) rowNoise.setOnClickListener(v -> {
             if (switchNoise != null) switchNoise.performClick();
         });
-        View rowWeather = view.findViewById(R.id.row_weather);
-        if (rowWeather != null) rowWeather.setOnClickListener(v -> {
-            if (switchWeather != null) switchWeather.performClick();
-        });
-
         refreshExtendedRowValues();
 
         // Register GPS provider change listener for real-time subtitle updates
@@ -588,7 +566,6 @@ public class WatermarkSettingsFragment extends Fragment {
         if (prefs.isAccuracyEnabled()) extendedPreview += "\nAccuracy: 12m";
         if (prefs.isCompassEnabled()) extendedPreview += "\nCompass: 220° SW";
         if (prefs.isNoiseEnabled()) extendedPreview += "\nNoise: 45dB";
-        if (prefs.isWeatherEnabled()) extendedPreview += "\n25°C Clear\nWind: 15 km/h";
         fadcamBase += extendedPreview;
         fadrecBase += extendedPreview;
 
@@ -920,45 +897,7 @@ public class WatermarkSettingsFragment extends Fragment {
             switchNoise.setChecked(prefs.isNoiseEnabled());
         }
 
-        TextView valueWeather = view.findViewById(R.id.value_weather);
-        if (valueWeather != null) {
-            if (prefs.isWeatherEnabled()) {
-                if (!gpsEnabled) {
-                    valueWeather.setText(getString(R.string.watermark_gps_disabled_warning));
-                    valueWeather.setTextColor(redColor);
-                } else {
-                    valueWeather.setText(getString(R.string.watermark_weather_on));
-                    valueWeather.setTextColor(greenColor);
-                }
-            } else {
-                valueWeather.setText(getString(R.string.watermark_weather_off));
-                valueWeather.setTextColor(grayColor);
-            }
-        }
-        AvatarToggleView switchWeather = view.findViewById(R.id.switch_weather);
-        if (switchWeather != null && switchWeather.isChecked() != prefs.isWeatherEnabled()) {
-            switchWeather.setChecked(prefs.isWeatherEnabled());
-        }
-
         updatePreview();
-    }
-
-    private void showNetworkWarningDialog(Runnable onConfirm) {
-        new AlertDialog.Builder(requireContext(), com.google.android.material.R.style.MaterialAlertDialog_Material3)
-                .setTitle(R.string.watermark_network_warning_title)
-                .setMessage(R.string.watermark_network_warning_message)
-                .setPositiveButton(R.string.watermark_network_warning_enable, (d, w) -> {
-                    onConfirm.run();
-                })
-                .setNegativeButton("Cancel", (d, w) -> {
-                    // Reset the switch
-                    View switchWeather = getView().findViewById(R.id.switch_weather);
-                    if (switchWeather instanceof com.fadcam.ui.AvatarToggleView) {
-                        ((com.fadcam.ui.AvatarToggleView) switchWeather).setChecked(false);
-                    }
-                    prefs.setWeatherEnabled(false);
-                })
-                .show();
     }
 
     private void showLocationFormatBottomSheet(){

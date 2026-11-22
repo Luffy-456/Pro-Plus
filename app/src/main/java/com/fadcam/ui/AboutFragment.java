@@ -93,7 +93,6 @@ public class AboutFragment extends BaseFragment {
         MaterialCardView fadSecInfoCard = view.findViewById(R.id.fadsec_info_card);
         MaterialButton sourceCodeButton = view.findViewById(R.id.source_code_button);
         MaterialButton donateButton = view.findViewById(R.id.donate_button);
-        MaterialButton checkUpdatesButton = view.findViewById(R.id.check_updates_button);
         TextView emailText = view.findViewById(R.id.email_text);
         TextView discordText = view.findViewById(R.id.discord_text);
         MaterialCardView privacyInfoCard = view.findViewById(R.id.privacy_info_card);
@@ -192,9 +191,6 @@ public class AboutFragment extends BaseFragment {
         
         appDescription.setText(Html.fromHtml(appDesc, Html.FROM_HTML_MODE_LEGACY));
         appDescription.setTextColor(Color.WHITE);
-        checkUpdatesButton.setTextColor(Color.WHITE);
-        checkUpdatesButton.setIconTint(ColorStateList.valueOf(Color.WHITE));
-        checkUpdatesButton.setStrokeColor(ColorStateList.valueOf(colorButton));
         fadSecInfoCard.setCardBackgroundColor(colorDialog);
         fadSecInfoCard.setStrokeColor(colorButton);
         TextView fadSecInfoText = fadSecInfoCard.findViewById(R.id.fadsec_info_text);
@@ -312,11 +308,9 @@ public class AboutFragment extends BaseFragment {
             KoFiSupportBottomSheet bottomSheet = new KoFiSupportBottomSheet();
             bottomSheet.show(getParentFragmentManager(), "KoFiSupportBottomSheet");
         });
-        checkUpdatesButton.setOnClickListener(v -> checkForUpdates());
         emailText.setOnClickListener(v -> sendEmail());
         discordText.setOnClickListener(v -> openUrl("https://discord.gg/kvAZvdkuuN"));
         setupPrivacyInfo(privacyInfoCard, scrollView);
-        view.findViewById(R.id.check_updates_button).setOnClickListener(v -> checkForUpdates());
 
         // Find text elements with specific content and set their colors
         ScrollView scrollViewObj = view.findViewById(R.id.scroll_view);
@@ -447,17 +441,6 @@ public class AboutFragment extends BaseFragment {
         });
     }
 
-    private String getAppVersionForUpdates() {
-        try {
-            PackageManager pm = requireActivity().getPackageManager();
-            PackageInfo pInfo = pm.getPackageInfo(requireActivity().getPackageName(), 0);
-            return pInfo.versionName;
-        } catch (PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
-            return "N/A";
-        }
-    }
-
     private void openUrl(String url) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         startActivity(intent);
@@ -470,153 +453,6 @@ public class AboutFragment extends BaseFragment {
         startActivity(intent);
     }
 
-
-    // Code for checking updates
-
-
-    private void checkForUpdates() {
-        showLoadingDialog(getString(R.string.up_to_date_loading));
-        ExecutorService updateExecutor = Executors.newSingleThreadExecutor();
-        updateExecutor.execute(() -> {
-            try {
-                String currentVersion = getAppVersionForUpdates();
-                com.fadcam.services.UpdateCheckService.UpdateCheckResult result =
-                    com.fadcam.services.UpdateCheckService.checkForUpdate(currentVersion);
-                FLog.d("UpdateCheck", "About check: package="
-                        + com.fadcam.BuildConfig.APPLICATION_ID
-                        + " isBetaApp=" + com.fadcam.BuildConfig.APPLICATION_ID.endsWith(".beta")
-                        + " current=" + currentVersion
-                        + " stable=" + result.stableVersion + "(" + result.hasStable + ")"
-                        + " beta=" + result.betaVersion + "(" + result.hasBeta + ")"
-                        + " pro=" + result.proVersion + "(" + result.hasPro + ")"
-                        + " error=" + result.errorOccurred);
-
-                requireActivity().runOnUiThread(() -> {
-                    dismissLoadingDialog();
-                    if (result.errorOccurred) {
-                        showErrorDialog(getString(R.string.about_update_failed));
-                    } else if (com.fadcam.BuildConfig.APPLICATION_ID.endsWith(".beta")
-                            && result.hasBeta) {
-                        // Beta app: surface the BETA update directly (testers need
-                        // the urgent info without hunting in the sidebar).
-                        BetaUpdateBottomSheet.newInstance(
-                            result.betaVersion, result.betaUrl, currentVersion)
-                            .show(getParentFragmentManager(), "BetaUpdateSheet");
-                    } else if (result.hasStable) {
-                        UpdateAvailableBottomSheet.newInstance(
-                            result.stableVersion, "", result.stableUrl)
-                            .show(getParentFragmentManager(), "UpdateAvailableBottomSheet");
-                    } else {
-                        if (result.hasBeta) {
-                            showUpToDateDialog(getString(R.string.about_beta_available, result.betaVersion),
-                                    result.betaUrl);
-                        } else {
-                            showUpToDateDialog("", null);
-                        }
-                    }
-                });
-            } catch (Exception e) {
-                e.printStackTrace();
-                requireActivity().runOnUiThread(() -> {
-                    dismissLoadingDialog();
-                    showErrorDialog(getString(R.string.about_update_failed));
-                });
-            }
-        });
-    }
-
-    private void showLoadingDialog(String message) {
-        requireActivity().runOnUiThread(() -> {
-            TextView messageView = new TextView(requireContext());
-            messageView.setText(message);
-            
-            // Check if we're using Snow Veil theme
-            String currentTheme = SharedPreferencesManager.getInstance(requireContext()).sharedPreferences.getString(com.fadcam.Constants.PREF_APP_THEME, Constants.DEFAULT_APP_THEME);
-            boolean isSnowVeilTheme = "Snow Veil".equals(currentTheme);
-            
-            // Set text color based on theme
-            messageView.setTextColor(isSnowVeilTheme ? Color.BLACK : Color.WHITE);
-            
-            messageView.setPadding(48, 32, 48, 32);
-            messageView.setTextSize(16);
-            MaterialAlertDialogBuilder builder = themedDialogBuilder(requireContext());
-            builder.setView(messageView);
-            builder.setCancelable(false);
-            loadingDialog = builder.create();
-            loadingDialog.show();
-        });
-    }
-
-    private void dismissLoadingDialog() {
-        if (loadingDialog != null && loadingDialog.isShowing()) {
-            loadingDialog.dismiss();
-        }
-    }
-
-
-
-
-
-    private void showUpToDateDialog() {
-        showUpToDateDialog("", null);
-    }
-
-    private void showUpToDateDialog(String extraMessage, String betaUrl) {
-        TextView messageView = new TextView(requireContext());
-        String msg = getString(R.string.up_to_date_description);
-        if (extraMessage != null && !extraMessage.isEmpty()) {
-            msg += extraMessage;
-        }
-        messageView.setText(msg);
-        
-        // Check if we're using Snow Veil theme
-        String currentTheme = SharedPreferencesManager.getInstance(requireContext()).sharedPreferences.getString(com.fadcam.Constants.PREF_APP_THEME, Constants.DEFAULT_APP_THEME);
-        boolean isSnowVeilTheme = "Snow Veil".equals(currentTheme);
-        
-        // Set text color based on theme
-        messageView.setTextColor(isSnowVeilTheme ? Color.BLACK : Color.WHITE);
-        
-        messageView.setPadding(48, 32, 48, 32);
-        messageView.setTextSize(16);
-        
-        MaterialAlertDialogBuilder builder = themedDialogBuilder(requireContext())
-                .setTitle(getString(R.string.up_to_date))
-                .setView(messageView)
-                .setPositiveButton(getString(R.string.about_dialog_ok), null);
-
-        if (betaUrl != null && !betaUrl.isEmpty()) {
-            builder.setNeutralButton(getString(R.string.about_get_beta), (dialog, which) -> openUrl(betaUrl));
-        }
-        
-        AlertDialog dialog = builder.create();
-        dialog.setOnShowListener(dialogInterface -> setDialogButtonColors(dialog));
-        dialog.show();
-    }
-
-    private void showErrorDialog(String message) {
-        // Check if we're using Snow Veil theme
-        String currentTheme = SharedPreferencesManager.getInstance(requireContext()).sharedPreferences.getString(com.fadcam.Constants.PREF_APP_THEME, Constants.DEFAULT_APP_THEME);
-        boolean isSnowVeilTheme = "Snow Veil".equals(currentTheme);
-        
-        MaterialAlertDialogBuilder builder = themedDialogBuilder(requireContext())
-                .setTitle(getString(R.string.about_dialog_error))
-                .setMessage(message)
-                .setPositiveButton(getString(R.string.about_dialog_ok), null);
-        
-        AlertDialog dialog = builder.create();
-        dialog.setOnShowListener(dialogInterface -> setDialogButtonColors(dialog));
-        dialog.show();
-        
-        // If using Snow Veil theme, make sure the message text is black
-        if (isSnowVeilTheme && dialog.findViewById(android.R.id.message) instanceof TextView) {
-            ((TextView) dialog.findViewById(android.R.id.message)).setTextColor(Color.BLACK);
-        }
-    }
-
-    private void openUpdateUrl(String url) {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        startActivity(intent);
-    }
 
 
     private int resolveThemeColor(int attr) {
@@ -716,7 +552,6 @@ public class AboutFragment extends BaseFragment {
             // Apply to other UI elements
             MaterialButton sourceCodeButton = rootView.findViewById(R.id.source_code_button);
             MaterialButton donateButton = rootView.findViewById(R.id.donate_button);
-            MaterialButton checkUpdatesButton = rootView.findViewById(R.id.check_updates_button);
             
             if (sourceCodeButton != null) {
                 sourceCodeButton.setTextColor(Color.WHITE);
@@ -730,11 +565,6 @@ public class AboutFragment extends BaseFragment {
                 donateButton.setIconTint(ColorStateList.valueOf(Color.BLACK));
             }
             
-            if (checkUpdatesButton != null) {
-                checkUpdatesButton.setTextColor(Color.BLACK);
-                checkUpdatesButton.setIconTint(ColorStateList.valueOf(Color.BLACK));
-                checkUpdatesButton.setStrokeColor(ColorStateList.valueOf(Color.BLACK));
-            }
             
             // Find and apply black tint ONLY to the email icon
             TextView emailText = rootView.findViewById(R.id.email_text);

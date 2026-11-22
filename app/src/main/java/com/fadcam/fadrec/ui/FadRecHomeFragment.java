@@ -1905,41 +1905,18 @@ public class FadRecHomeFragment extends HomeFragment {
      */
     @Override
     protected void updateStorageInfo() {
-        boolean isStreamOnlyMode = false;
-        if (sharedPreferencesManager != null) {
-            try {
-                // STREAM_ONLY UI ("Unlimited" label, no storage deduction) is only meaningful
-                // when the remote server is actually active.  If the server is off we always
-                // behave like STREAM_AND_SAVE so the UI stays accurate.
-                boolean serverActive =
-                    com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode mode =
-                    sharedPreferencesManager.getStreamingMode();
-                isStreamOnlyMode = serverActive &&
-                    (mode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-            } catch (Exception e) {
-                FLog.e(TAG, "Error checking streaming mode", e);
-            }
-        }
-        updateStorageInfoForScreenRecording(isStreamOnlyMode);
+        updateStorageInfoForScreenRecording();
     }
 
     /**
      * Unified storage/timer UI update for FadRec (screen recording).
-     *
-     * <p>Both STREAM_ONLY and STREAM_AND_SAVE share the same view bindings; only the
-     * deduction logic and the remaining-time label differ:
-     * <ul>
-     *   <li>STREAM_ONLY  – no bytes written to disk → no deduction, show ∞ for time-left.</li>
-     *   <li>STREAM_AND_SAVE – deduct estimated bytes (bitrate × elapsed) and show live countdown.</li>
-     * </ul>
      *
      * <p>Reads elapsed time from {@code "screen_recording_start_time"} saved by
      * {@link com.fadcam.fadrec.services.ScreenRecordingService}, uses
      * {@code tvEstimateTitle} / {@code tvEstimateSubtitle} (the actual layout views) for
      * the time-left row, and respects the elapsed-labels visibility preference.
      */
-    private void updateStorageInfoForScreenRecording(boolean isStreamOnly) {
+    private void updateStorageInfoForScreenRecording() {
         if (!isAdded() || getActivity() == null) {
             return;
         }
@@ -1972,28 +1949,20 @@ public class FadRecHomeFragment extends HomeFragment {
             long adjustedAvailable;
             String remainingTimeText;
 
-            if (isStreamOnly) {
-                // Nothing is written to disk — show full available space and infinite time.
-                adjustedAvailable = storageInfo.availableBytes;
-                remainingTimeText = "Unlimited"; // More readable than ∞ symbol
-            } else {
-                // Deduct estimated bytes written so far.
-                long bitrateBps = calculateScreenRecordingBitrateBps();
-                long estimatedBytesUsed = 0;
-                if (elapsedTime > 0 && bitrateBps > 0) {
-                    estimatedBytesUsed = (elapsedTime * bitrateBps) / 8000L;
-                    estimatedBytesUsed = Math.min(estimatedBytesUsed, storageInfo.availableBytes);
-                }
-                adjustedAvailable = Math.max(0, storageInfo.availableBytes - estimatedBytesUsed);
+            long bitrateBps = calculateScreenRecordingBitrateBps();
+            long estimatedBytesUsed = 0;
+            if (elapsedTime > 0 && bitrateBps > 0) {
+                estimatedBytesUsed = (elapsedTime * bitrateBps) / 8000L;
+                estimatedBytesUsed = Math.min(estimatedBytesUsed, storageInfo.availableBytes);
+            }
+            adjustedAvailable = Math.max(0, storageInfo.availableBytes - estimatedBytesUsed);
 
-                // Live countdown while recording; static estimate otherwise.
-                if (bitrateBps > 0) {
-                    long totalSecs = (adjustedAvailable * 8L) / bitrateBps;
-                    totalSecs = Math.max(0, totalSecs);
-                    remainingTimeText = formatScreenRemainingTime(totalSecs);
-                } else {
-                    remainingTimeText = "\u221e";
-                }
+            if (bitrateBps > 0) {
+                long totalSecs = (adjustedAvailable * 8L) / bitrateBps;
+                totalSecs = Math.max(0, totalSecs);
+                remainingTimeText = formatScreenRemainingTime(totalSecs);
+            } else {
+                remainingTimeText = getString(R.string.home_storage_time_unavailable);
             }
 
             // ── Format UI strings ────────────────────────────────────────────────────

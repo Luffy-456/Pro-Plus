@@ -8,8 +8,6 @@ import com.fadcam.SharedPreferencesManager;
 import com.fadcam.opengl.WatermarkInfoProvider;
 import com.fadcam.sensors.SensorDataProvider;
 import com.fadcam.audio.NoiseMonitor;
-import com.fadcam.network.WeatherService;
-import com.fadcam.services.LocationGeocoder;
 import com.fadcam.ui.LocationHelper;
 
 import java.text.SimpleDateFormat;
@@ -32,10 +30,8 @@ public class WatermarkManager implements WatermarkInfoProvider {
 
     // ── Sensor / data providers ──────────────────────────────────────
     private LocationHelper locationHelper;
-    private LocationGeocoder locationGeocoder;
     private SensorDataProvider sensorDataProvider;
     private NoiseMonitor noiseMonitor;
-    private WeatherService weatherService;
 
     // ── Cached location state (throttled GPS check + location text) ──
     private long lastLocationWatermarkUpdateMs;
@@ -83,11 +79,6 @@ public class WatermarkManager implements WatermarkInfoProvider {
             noiseMonitor.start(context);
         }
 
-        if (prefs.isWeatherEnabled()) {
-            weatherService = WeatherService.getInstance(context);
-        }
-
-        locationGeocoder = new LocationGeocoder();
         FLog.d(TAG, "Watermark providers initialised");
     }
 
@@ -104,10 +95,6 @@ public class WatermarkManager implements WatermarkInfoProvider {
         if (noiseMonitor != null) {
             noiseMonitor.stop();
             noiseMonitor = null;
-        }
-        if (locationGeocoder != null) {
-            locationGeocoder.shutdown();
-            locationGeocoder = null;
         }
         cachedGpsProviderEnabled = false;
         cachedLocationWatermarkText = "";
@@ -232,25 +219,7 @@ public class WatermarkManager implements WatermarkInfoProvider {
             if (locData == null || !locData.contains("Lat:")) {
                 cachedLocationWatermarkText = "";
             } else {
-                String format = prefs.getWatermarkLocationFormat();
-                if ("address".equals(format) && locationGeocoder != null) {
-                    org.osmdroid.util.GeoPoint geoPoint = locationHelper.getCurrentLocation();
-                    if (geoPoint != null) {
-                        locationGeocoder.geocodeAsync(geoPoint.getLatitude(), geoPoint.getLongitude(),
-                                result -> { /* async — result used next cycle */ });
-                        LocationGeocoder.GeocodeResult result = locationGeocoder.getCurrentResult();
-                        if (!result.isEmpty()) {
-                            cachedLocationWatermarkText = "\nLat: " + geoPoint.getLatitude()
-                                    + ", Long: " + geoPoint.getLongitude() + "\n" + result.formatted;
-                        } else {
-                            cachedLocationWatermarkText = locData;
-                        }
-                    } else {
-                        cachedLocationWatermarkText = locData;
-                    }
-                } else {
-                    cachedLocationWatermarkText = locData;
-                }
+                cachedLocationWatermarkText = locData;
             }
 
             if (prefs.isUtmEnabled() && locationHelper != null) {
@@ -336,17 +305,6 @@ public class WatermarkManager implements WatermarkInfoProvider {
 
         if (prefs.isNoiseEnabled() && noiseMonitor != null && noiseMonitor.isRunning()) {
             sb.append("\nNoise: ").append(noiseMonitor.getReadableDb());
-        }
-
-        if (prefs.isWeatherEnabled() && weatherService != null && locationHelper != null) {
-            org.osmdroid.util.GeoPoint geoPoint = locationHelper.getCurrentLocation();
-            if (geoPoint != null) {
-                weatherService.fetchWeather(geoPoint, (weather, wind) -> {});
-                String weather = weatherService.getCurrentWeather();
-                String wind = weatherService.getCurrentWind();
-                if (weather != null && !weather.isEmpty()) sb.append("\n").append(weather);
-                if (wind != null && !wind.isEmpty()) sb.append("\nWind: ").append(wind);
-            }
         }
 
         return sb.toString();

@@ -660,20 +660,15 @@ public class SettingsHomeFragment extends Fragment {
     /** Refresh inline value TextViews in settings rows (e.g. resolution subtitle). */
     private void refreshAppInlineValues(View root) {
         android.widget.TextView vOn = root.findViewById(R.id.value_onboarding);
-        android.widget.TextView vAuto = root.findViewById(R.id.value_auto_update);
         android.widget.TextView vDebug = root.findViewById(R.id.value_debug_logging);
         com.fadcam.SharedPreferencesManager prefs = com.fadcam.SharedPreferencesManager.getInstance(requireContext());
         if (vOn != null) { vOn.setText(prefs.isShowOnboarding() ? getString(R.string.universal_enable) : getString(R.string.universal_disable)); }
-        boolean auto = prefs.sharedPreferences.getBoolean("auto_update_check_enabled", true);
-        if (vAuto != null) { vAuto.setText(auto ? getString(R.string.universal_enable) : getString(R.string.universal_disable)); }
         if (vDebug != null) { vDebug.setText(prefs.isDebugLoggingEnabled() ? getString(R.string.universal_enable) : getString(R.string.universal_disable)); }
     }
 
     private void wireAppInlineRows(View root) {
         View rowOnboarding = root.findViewById(R.id.group_onboarding);
         if (rowOnboarding != null) { rowOnboarding.setOnClickListener(v -> showOnboardingSwitchSheet()); }
-        View rowAutoUpdate = root.findViewById(R.id.group_auto_update);
-        if (rowAutoUpdate != null) { rowAutoUpdate.setOnClickListener(v -> showAutoUpdateSwitchSheet()); }
         View rowDebug = root.findViewById(R.id.group_debug_logging);
         if (rowDebug != null) {
             rowDebug.setOnClickListener(v -> {
@@ -700,24 +695,6 @@ public class SettingsHomeFragment extends Fragment {
                 getString(R.string.setting_onboarding_title), new java.util.ArrayList<>(), null, resultKey, helper,
                 getString(R.string.setting_onboarding_title), enabled);
         sheet.show(getParentFragmentManager(), "onboarding_switch_sheet");
-    }
-
-    private void showAutoUpdateSwitchSheet() {
-        final String resultKey = "picker_result_auto_update";
-        com.fadcam.SharedPreferencesManager prefs = com.fadcam.SharedPreferencesManager.getInstance(requireContext());
-        boolean enabled = prefs.sharedPreferences.getBoolean("auto_update_check_enabled", true);
-        getParentFragmentManager().setFragmentResultListener(resultKey, this, (k, b) -> {
-            if (b.containsKey(com.fadcam.ui.picker.PickerBottomSheetFragment.BUNDLE_SWITCH_STATE)) {
-                boolean state = b.getBoolean(com.fadcam.ui.picker.PickerBottomSheetFragment.BUNDLE_SWITCH_STATE);
-                prefs.sharedPreferences.edit().putBoolean("auto_update_check_enabled", state).apply();
-                refreshAppInlineValues(requireView());
-            }
-        });
-        String helper = getString(R.string.note_auto_update_check);
-        com.fadcam.ui.picker.PickerBottomSheetFragment sheet = com.fadcam.ui.picker.PickerBottomSheetFragment.newInstanceWithSwitch(
-                getString(R.string.setting_auto_update_check_title), new java.util.ArrayList<>(), null, resultKey, helper,
-                getString(R.string.setting_auto_update_check_title), enabled);
-        sheet.show(getParentFragmentManager(), "auto_update_switch_sheet");
     }
 
     private void showDebugLoggingSwitchSheet() {

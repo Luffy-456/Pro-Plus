@@ -134,11 +134,9 @@ public class RecordingService extends Service {
     private boolean previewSurfaceAdded = false; // Flag to track if preview surface was added to session
 
     private LocationHelper locationHelper;
-    private LocationGeocoder locationGeocoder;
     private GeotagHelper geotagHelper;
     private com.fadcam.sensors.SensorDataProvider sensorDataProvider;
     private com.fadcam.audio.NoiseMonitor noiseMonitor;
-    private com.fadcam.network.WeatherService weatherService;
 
     // Location watermark update tracking - separate from main watermark update
     private long lastLocationWatermarkUpdateMs = 0;
@@ -268,9 +266,6 @@ public class RecordingService extends Service {
         // stuck at 0 (the exact bug users reported).
         if (sharedPreferencesManager != null && needsLocationData()) {
             locationHelper = new LocationHelper(this); // For watermark text
-            // Also initialize geocoder for reverse geocoding (non-blocking, cached)
-            // Uses Nominatim (free, open-source) - no API keys needed
-            locationGeocoder = new LocationGeocoder();
         } else {
             // no location-dependent feature enabled
         }
@@ -287,7 +282,7 @@ public class RecordingService extends Service {
             // location embedding disabled
         }
 
-        // Sensor providers (NoiseMonitor, SensorDataProvider, WeatherService)
+        // Sensor providers (NoiseMonitor and SensorDataProvider)
         // are now initialized lazily in the START_RECORDING intent handler
         // — NOT here in onCreate — to prevent mic/sensor memory leaks
         // during preview-only mode and while the service is idle.
@@ -478,7 +473,7 @@ public class RecordingService extends Service {
         if (currentCameraCharacteristics != null) {
             Range<Integer> range = currentCameraCharacteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE);
             if (range != null) {
-                // Persist the device's actual range so RemoteStreamManager can surface it
+                // Persist the device's actual exposure compensation range.
                 try {
                     if (sharedPreferencesManager != null) {
                         sharedPreferencesManager.setExposureCompensationRange(range.getLower(), range.getUpper());
@@ -1613,34 +1608,6 @@ public class RecordingService extends Service {
                 // setup log removed
             }
 
-            if (sharedPreferencesManager != null && sharedPreferencesManager.isWeatherEnabled()) {
-                if (weatherService == null) {
-                    weatherService = com.fadcam.network.WeatherService.getInstance(getApplicationContext());
-                }
-                FLog.d(TAG, "WeatherService initialized for recording");
-            }
-            
-            // STREAM ENFORCEMENT GATE: Validate and gate streaming mode
-            boolean streamingEnabled = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-            android.content.SharedPreferences fadcamPrefs = getSharedPreferences("FadCamPrefs", Context.MODE_PRIVATE);
-            String presetName = fadcamPrefs.getString("quality_preset", "HIGH");
-            int presetBitrate = fadcamPrefs.getInt("stream_bitrate", 5_000_000);
-            int presetFps = fadcamPrefs.getInt("stream_fps_cap", 30);
-            
-            if (streamingEnabled) {
-                FLog.i(TAG, "🔴 [STREAM MODE ENFORCED] Starting recording with streaming server ACTIVE");
-                FLog.i(TAG, "   Preset: " + presetName + " | Bitrate: " + (presetBitrate/1_000_000) + " Mbps | FPS cap: " + presetFps + "fps");
-                // Validate preset values were actually stored
-                if (presetBitrate <= 0 || presetFps <= 0) {
-                    FLog.e(TAG, "❌ INVALID STREAM PRESET - bitrate=" + presetBitrate + ", fps=" + presetFps);
-                    mainHandler.post(() -> Toast.makeText(getApplicationContext(), 
-                        "Stream preset invalid - check quality settings", Toast.LENGTH_SHORT).show());
-                    return START_STICKY;
-                }
-            } else {
-                FLog.i(TAG, "📺 [NORMAL RECORDING] Starting recording - streaming server OFF");
-            }
-            
             // Check for rapid start attempts
             long currentTime = System.currentTimeMillis();
             if (currentTime - lastStartAttemptTime < MIN_START_INTERVAL_MS) {
@@ -1871,7 +1838,6 @@ public class RecordingService extends Service {
                 Constants.EXTRA_BROADCAST_EXPOSURE_COMPENSATION,
                 sharedPreferencesManager.getSavedExposureCompensation());
             sendBroadcast(exposureBroadcast.setPackage(getPackageName()));
-            com.fadcam.streaming.RemoteStreamManager.getInstance().invalidateStatusCache();
             }
             return START_STICKY;
         } else if (Constants.INTENT_ACTION_TOGGLE_AE_LOCK.equals(action)) {
@@ -1941,7 +1907,6 @@ public class RecordingService extends Service {
                     zoomBcast.putExtra(Constants.EXTRA_BROADCAST_PAN_Y, broadcastPanY);
                     this.sendBroadcast(zoomBcast.setPackage(this.getPackageName()));
                 }
-                com.fadcam.streaming.RemoteStreamManager.getInstance().invalidateStatusCache();
             }
             return START_STICKY;
         } else if (Constants.INTENT_ACTION_SET_FRONT_VIDEO_MIRROR.equals(action)) {
@@ -2206,15 +2171,6 @@ public class RecordingService extends Service {
             }
         }
 
-        if (locationGeocoder != null) {
-            try {
-                locationGeocoder.shutdown();
-                FLog.d(TAG, "LocationGeocoder: Shutdown geocoding service");
-            } catch (Exception e) {
-                FLog.e(TAG, "Error shutting down LocationGeocoder", e);
-            }
-        }
-
         // Force recording to stop if somehow it's still active
         if (recordingState != RecordingState.NONE) {
             FLog.w(TAG, "Service being destroyed while recording is active. Forcing stop.");
@@ -2340,15 +2296,6 @@ public class RecordingService extends Service {
         sharedPreferencesManager.setRecordingInProgress(false);
         com.fadcam.ActiveRecordingStats.clearActiveSegment();
         
-        // Notify RemoteStreamManager that recording stopped
-        try {
-            com.fadcam.streaming.RemoteStreamManager.getInstance().stopRecording();
-            FLog.i(TAG, "🛑 RemoteStreamManager notified: recording stopped");
-            
-        } catch (Exception e) {
-            FLog.e(TAG, "Failed to notify RemoteStreamManager about recording stop", e);
-        }
-
         recordingStartTime = 0L;
         pauseStartedAt = 0L;
         accumulatedPausedDurationMs = 0L;
@@ -2397,53 +2344,6 @@ public class RecordingService extends Service {
                     } finally {
                         glRecordingPipeline = null;
                     }
-                }
-
-                // Delete temporary file if in STREAM_ONLY mode
-                if (currentSegmentFile != null && currentSegmentFile.exists()) {
-                    com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode = 
-                        com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-                    if (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY) {
-                        boolean deleted = currentSegmentFile.delete();
-                        if (deleted) {
-                            FLog.i(TAG, "🗑️ STREAM_ONLY: Deleted temporary file: " + currentSegmentFile.getName());
-                        } else {
-                            FLog.w(TAG, "⚠️ Failed to delete temporary file: " + currentSegmentFile.getAbsolutePath());
-                        }
-                    }
-                }
-
-                // STREAM_ONLY: Clean up ALL tracked temporary files (internal storage)
-                // Handles segment splits where multiple temp files were created
-                if (!streamOnlyTempFiles.isEmpty()) {
-                    FLog.i(TAG, "🗑️ STREAM_ONLY: Cleaning up " + streamOnlyTempFiles.size() + " tracked temp files");
-                    for (File tempFile : streamOnlyTempFiles) {
-                        if (tempFile != null && tempFile.exists()) {
-                            boolean deleted = tempFile.delete();
-                            FLog.i(TAG, "🗑️ STREAM_ONLY: " + (deleted ? "Deleted" : "FAILED to delete") + " temp: " + tempFile.getName());
-                        }
-                    }
-                    streamOnlyTempFiles.clear();
-                }
-
-                // STREAM_ONLY (SAF): Clean up tracked SAF URIs (SD card storage)
-                // These are 0-byte files created for the GL pipeline but never written to
-                if (!streamOnlySafUris.isEmpty()) {
-                    FLog.i(TAG, "🗑️ STREAM_ONLY (SAF): Cleaning up " + streamOnlySafUris.size() + " tracked SAF files");
-                    for (String uriStr : streamOnlySafUris) {
-                        try {
-                            Uri safUri = Uri.parse(uriStr);
-                            androidx.documentfile.provider.DocumentFile docFile =
-                                    androidx.documentfile.provider.DocumentFile.fromSingleUri(RecordingService.this, safUri);
-                            if (docFile != null && docFile.exists()) {
-                                boolean deleted = docFile.delete();
-                                FLog.i(TAG, "🗑️ STREAM_ONLY (SAF): " + (deleted ? "Deleted" : "FAILED to delete") + " URI: " + uriStr);
-                            }
-                        } catch (Exception e) {
-                            FLog.w(TAG, "⚠️ STREAM_ONLY (SAF): Error deleting URI: " + uriStr + " - " + e.getMessage());
-                        }
-                    }
-                    streamOnlySafUris.clear();
                 }
 
                 // Give some time for the GL pipeline to release resources
@@ -2591,9 +2491,6 @@ public class RecordingService extends Service {
         if (durationLimitController != null && durationLimitController.pauseSession()) {
             FLog.d(TAG, "Paused maximum recording duration countdown");
         }
-        // Notify RemoteStreamManager so status JSON reflects paused state
-        com.fadcam.streaming.RemoteStreamManager.getInstance().pauseRecording();
-
         // Battery saving: release camera while paused (unless motion detection needs it).
         // The GL pipeline stays alive (paused) so recording can resume instantly.
         if (!motionLabEnabledForSession && !isSwitchingCamera) {
@@ -2640,9 +2537,6 @@ public class RecordingService extends Service {
         if (durationLimitController != null && durationLimitController.resumeSession()) {
             FLog.d(TAG, "Resumed maximum recording duration countdown");
         }
-        // Notify RemoteStreamManager so status JSON reflects resumed (recording) state
-        com.fadcam.streaming.RemoteStreamManager.getInstance().resumeRecording();
-        
         // Resume noise monitor and sensors if they were enabled
         if (sharedPreferencesManager != null && sharedPreferencesManager.isNoiseEnabled() && noiseMonitor != null) {
             noiseMonitor.start(this);
@@ -4573,18 +4467,6 @@ public class RecordingService extends Service {
             // supports it
             int targetFrameRate = sharedPreferencesManager.getSpecificVideoFrameRate(cameraType);
             
-            // Apply streaming FPS cap only when server is actually ON
-            boolean isStreamingForFps1 = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-            android.content.SharedPreferences fadcamPrefs = getSharedPreferences("FadCamPrefs", Context.MODE_PRIVATE);
-            if (isStreamingForFps1) {
-                int streamFpsCap = fadcamPrefs.getInt("stream_fps_cap", -1);
-                if (streamFpsCap > 0 && targetFrameRate > streamFpsCap) {
-                    FLog.i(TAG, "[STREAM PRESET] Capping camera FPS: " + targetFrameRate + " → " + streamFpsCap + "fps (server ON)");
-                    targetFrameRate = streamFpsCap;
-                }
-            } else {
-            }
-            
             boolean isHighFrameRate = targetFrameRate >= 120;
             boolean useHighSpeedSession = false;
             Size selected = sharedPreferencesManager.getCameraResolution();
@@ -4655,17 +4537,6 @@ public class RecordingService extends Service {
             // Get target frame rate from settings for specific camera
             int targetFrameRate = sharedPreferencesManager.getSpecificVideoFrameRate(cameraType);
             
-            // Apply streaming FPS cap only when server is actually ON
-            boolean isStreamingForFps2 = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-            android.content.SharedPreferences fadcamPrefs = getSharedPreferences("FadCamPrefs", Context.MODE_PRIVATE);
-            if (isStreamingForFps2) {
-                int streamFpsCap = fadcamPrefs.getInt("stream_fps_cap", -1);
-                if (streamFpsCap > 0 && targetFrameRate > streamFpsCap) {
-                    FLog.i(TAG, "[STREAM PRESET] Capping camera FPS: " + targetFrameRate + " → " + streamFpsCap + "fps (server ON)");
-                    targetFrameRate = streamFpsCap;
-                }
-            } else {
-            }
             maybeAttachMotionAnalysisSurface(surfaces, targetFrameRate);
 
             // Log device info once for debugging
@@ -5036,30 +4907,11 @@ public class RecordingService extends Service {
     }
 
     private int getVideoBitrate() {
-        int videoBitrate;
-        boolean isStreaming = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-        
-        if (isStreaming) {
-            // Server is ON: enforce stream quality preset bitrate, ignore user settings
-            android.content.SharedPreferences fadcamPrefs = getSharedPreferences("FadCamPrefs", android.content.Context.MODE_PRIVATE);
-            int streamBitrate = fadcamPrefs.getInt("stream_bitrate", -1);
-            String preset = fadcamPrefs.getString("quality_preset", "HIGH");
-            if (streamBitrate > 0) {
-                videoBitrate = streamBitrate;
-                FLog.i(TAG, "[STREAM PRESET] Bitrate enforced: " + (videoBitrate / 1_000_000) + " Mbps (preset=" + preset + ") — user settings ignored");
-            } else {
-                // Preset not set yet, fall back to default HIGH
-                videoBitrate = 5_000_000;
-                FLog.w(TAG, "[STREAM PRESET] Server ON but no preset stored — using default HIGH (5 Mbps)");
-            }
-        } else if (sharedPreferencesManager.sharedPreferences.getBoolean("bitrate_mode_custom", false)) {
-            videoBitrate = sharedPreferencesManager.sharedPreferences.getInt("bitrate_custom_value", 16000) * 1000;
-        } else {
-            videoBitrate = Utils.estimateBitrate(sharedPreferencesManager.getCameraResolution(),
-                    sharedPreferencesManager.getVideoFrameRate());
-            // bitrate log removed " + (videoBitrate / 1000) + " kbps");
+        if (sharedPreferencesManager.sharedPreferences.getBoolean("bitrate_mode_custom", false)) {
+            return sharedPreferencesManager.sharedPreferences.getInt("bitrate_custom_value", 16000) * 1000;
         }
-        return videoBitrate;
+        return Utils.estimateBitrate(sharedPreferencesManager.getCameraResolution(),
+                sharedPreferencesManager.getVideoFrameRate());
     }
 
     private int getFontSizeBasedOnBitrate() {
@@ -5145,46 +4997,7 @@ public class RecordingService extends Service {
                 // Location data invalid or missing GPS coordinates");
                 cachedLocationWatermarkText = "";
             } else {
-                // Apply format preference
-                String format = sharedPreferencesManager.getWatermarkLocationFormat();
-                FLog.d(TAG, "📍 Location format preference: " + format);
-                
-                if ("address".equals(format)) {
-                    if (locationGeocoder != null) {
-                        // Get coordinates from LocationHelper's current location
-                        org.osmdroid.util.GeoPoint geoPoint = locationHelper.getCurrentLocation();
-                        if (geoPoint != null) {
-                            // Log redacted coords (~1km precision) for privacy
-                            FLog.d(TAG, "📍 Coordinates: ~" + String.format(java.util.Locale.US, "%.2f", geoPoint.getLatitude()) + ", ~" + String.format(java.util.Locale.US, "%.2f", geoPoint.getLongitude()));
-                            
-                            // Trigger async geocoding if not already cached
-                            locationGeocoder.geocodeAsync(geoPoint.getLatitude(), geoPoint.getLongitude(), result -> {
-                                FLog.d(TAG, "🌐 Geocode callback: result ready=" + !result.isEmpty());
-                            });
-                            
-                            // Try to get cached result if available
-                            LocationGeocoder.GeocodeResult result = locationGeocoder.getCurrentResult();
-                            if (!result.isEmpty()) {
-                                cachedLocationWatermarkText = "\nLat: " + geoPoint.getLatitude() + ", Long: " + geoPoint.getLongitude()
-                                     + "\n" + result.formatted;
-                                FLog.d(TAG, "📍 address format applied");
-                            } else {
-                                cachedLocationWatermarkText = locData;
-                                FLog.d(TAG, "📍 Geocoding result not ready, using coordinates only");
-                            }
-                        } else {
-                            cachedLocationWatermarkText = locData;
-                            FLog.w(TAG, "❌ GeoPoint is null, using coordinates only");
-                        }
-                    } else {
-                        cachedLocationWatermarkText = locData;
-                        FLog.w(TAG, "❌ LocationGeocoder not initialized, using coordinates only");
-                    }
-                } else {
-                    // Default: coordinates only
-                    cachedLocationWatermarkText = locData;
-                    FLog.d(TAG, "📍 Using coordinates-only format");
-                }
+                cachedLocationWatermarkText = locData;
             }
             
             // Append UTM coordinates if enabled and location is available
@@ -5310,24 +5123,6 @@ public class RecordingService extends Service {
             double db = noiseMonitor.getCurrentDb();
             // sensor log removed
             sb.append("\nNoise: ").append(noiseMonitor.getReadableDb());
-        }
-
-        if (sharedPreferencesManager.isWeatherEnabled() && weatherService != null && locationHelper != null) {
-            org.osmdroid.util.GeoPoint geoPoint = locationHelper.getCurrentLocation();
-            if (geoPoint != null) {
-                weatherService.fetchWeather(geoPoint, (weather, wind) -> {
-                    FLog.d(TAG, "Weather callback: " + weather + ", " + wind);
-                });
-                String weather = weatherService.getCurrentWeather();
-                String wind = weatherService.getCurrentWind();
-                if (weather != null && !weather.isEmpty()) {
-                    sb.append("\n").append(weather);
-                }
-                if (wind != null && !wind.isEmpty()) {
-                    sb.append("\nWind: ").append(wind);
-                }
-                FLog.d(TAG, "Extended: weather=" + weather + ", wind=" + wind);
-            }
         }
 
         String result = sb.toString();
@@ -5816,7 +5611,6 @@ public class RecordingService extends Service {
                     intent.putExtra(Constants.INTENT_EXTRA_TORCH_STATE, isRecordingTorchEnabled);
                     sendBroadcast(intent);
                     
-                    // Update SharedPreferences so RemoteStreamManager can read current torch state
                     android.content.SharedPreferences prefs = getSharedPreferences(com.fadcam.Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE);
                     prefs.edit()
                         .putBoolean(Constants.PREF_TORCH_STATE, isRecordingTorchEnabled)
@@ -5923,35 +5717,19 @@ public class RecordingService extends Service {
     }
 
     @Nullable
-    private File resolveInternalRecordingVideoDir(boolean isStreamAndSave) {
-        if (isStreamAndSave) {
-            return RecordingStoragePaths.getInternalCategoryDir(this, RecordingStoragePaths.Category.STREAM, true);
-        }
+    private File resolveInternalRecordingVideoDir() {
         return RecordingStoragePaths.getInternalCameraSourceDir(this, recordingSessionCameraSource, true);
     }
 
     @Nullable
-    private DocumentFile resolveSafRecordingVideoDir(@Nullable String customUriString, boolean isStreamAndSave) {
+    private DocumentFile resolveSafRecordingVideoDir(@Nullable String customUriString) {
         if (customUriString == null || customUriString.isEmpty()) return null;
-        if (isStreamAndSave) {
-            return RecordingStoragePaths.getSafCategoryDir(
-                    this,
-                    customUriString,
-                    RecordingStoragePaths.Category.STREAM,
-                    true);
-        }
         return RecordingStoragePaths.getSafCameraSourceDir(this, customUriString, recordingSessionCameraSource, true);
     }
 
     private File createNextSegmentOutputFile(int nextSegmentNumber) {
         String storageMode = sharedPreferencesManager.getStorageMode();
-        
-        // Use "Stream_" prefix only if streaming is actually enabled (server running)
-        boolean isStreamingActive = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-        com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode = 
-            com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-        boolean isStreamAndSave = isStreamingActive && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_AND_SAVE);
-        String filenamePrefix = isStreamAndSave ? "Stream_" : Constants.RECORDING_DIRECTORY + "_";
+        String filenamePrefix = Constants.RECORDING_DIRECTORY + "_";
         
         if (SharedPreferencesManager.STORAGE_MODE_CUSTOM.equals(storageMode)) {
             // SAF/DocumentFile mode
@@ -5960,7 +5738,7 @@ public class RecordingService extends Service {
                 FLog.e(TAG, "createNextSegmentOutputFile: Custom storage selected but URI is null");
                 return null;
             }
-            DocumentFile pickedDir = resolveSafRecordingVideoDir(customUriString, isStreamAndSave);
+            DocumentFile pickedDir = resolveSafRecordingVideoDir(customUriString);
             if (pickedDir == null || !pickedDir.canWrite()) {
                 FLog.e(TAG, "createNextSegmentOutputFile: Cannot write to selected custom directory");
                 return null;
@@ -5998,7 +5776,7 @@ public class RecordingService extends Service {
                     + Constants.RECORDING_FILE_EXTENSION;
 
             // Use the same directory as the first segment (app's external files directory)
-            File videoDir = resolveInternalRecordingVideoDir(isStreamAndSave);
+            File videoDir = resolveInternalRecordingVideoDir();
             if (videoDir == null) {
                 FLog.e(TAG, "Cannot create recording directory for split segment");
                 Toast.makeText(this, getString(R.string.toast_create_recording_dir_error), Toast.LENGTH_LONG).show();
@@ -6147,13 +5925,7 @@ public class RecordingService extends Service {
                     }
 
                     locationHelper = new LocationHelper(this);
-                    // Also initialize geocoder for reverse geocoding
-                    // Uses Nominatim (free, open-source) - no API keys needed
-                    if (locationGeocoder != null) {
-                        locationGeocoder.shutdown();
-                    }
-                    locationGeocoder = new LocationGeocoder();
-                    FLog.d(TAG, "Created new LocationHelper and LocationGeocoder for watermark");
+                    FLog.d(TAG, "Created new LocationHelper for watermark");
                 } catch (Exception e) {
                     FLog.e(TAG, "Error initializing LocationHelper/Geocoder", e);
                 }
@@ -6168,15 +5940,6 @@ public class RecordingService extends Service {
                     locationHelper = null;
                 } catch (Exception e) {
                     FLog.e(TAG, "Error stopping LocationHelper", e);
-                }
-            }
-            if (locationGeocoder != null) {
-                try {
-                    locationGeocoder.shutdown();
-                    locationGeocoder = null;
-                    FLog.d(TAG, "Shutdown LocationGeocoder");
-                } catch (Exception e) {
-                    FLog.e(TAG, "Error shutting down LocationGeocoder", e);
                 }
             }
         }
@@ -6779,16 +6542,6 @@ public class RecordingService extends Service {
                 // Broadcast that recording has started
                 broadcastOnRecordingStarted();
 
-                // Notify RemoteStreamManager about active recording file
-                if (currentSegmentFile != null) {
-                    try {
-                        com.fadcam.streaming.RemoteStreamManager.getInstance()
-                            .startRecording(currentSegmentFile);
-                        FLog.i(TAG, "🎬 RemoteStreamManager notified: recording started");
-                    } catch (Exception e) {
-                        FLog.e(TAG, "Failed to notify RemoteStreamManager about recording start", e);
-                    }
-                }
                 if (motionLabEnabledForSession) {
                     // In Motion Lab, arm in paused state first and let motion transitions resume recording.
                     FLog.i(TAG, "MotionLab armed: entering paused state until trigger");
@@ -6939,26 +6692,15 @@ public class RecordingService extends Service {
     private ParcelFileDescriptor currentSegmentParcelFileDescriptor;
     private ParcelFileDescriptor previousSegmentParcelFileDescriptor;
     
-    // Track all temporary files created during STREAM_ONLY mode for cleanup
-    // In STREAM_ONLY, 0-byte segment files are created (GL pipeline needs a handle)
-    // but no data is written. All of them must be deleted when recording stops.
-    private final java.util.List<File> streamOnlyTempFiles = new java.util.ArrayList<>();
-    private final java.util.List<String> streamOnlySafUris = new java.util.ArrayList<>();
-    
     // Add this helper method for OpenGL pipeline direct output
     private File getFinalOutputFile() {
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         String segmentSuffix = ""; // No segment number for the initial file
         
-        // Use "Stream_" prefix only if streaming is actually enabled (server running)
-        boolean isStreamingActive = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-        com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode = 
-            com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-        boolean isStreamAndSave = isStreamingActive && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_AND_SAVE);
-        String filenamePrefix = isStreamAndSave ? "Stream_" : Constants.RECORDING_DIRECTORY + "_";
+        String filenamePrefix = Constants.RECORDING_DIRECTORY + "_";
         String baseFilename = filenamePrefix + timestamp + segmentSuffix + "."
                 + Constants.RECORDING_FILE_EXTENSION;
-        File videoDir = resolveInternalRecordingVideoDir(isStreamAndSave);
+        File videoDir = resolveInternalRecordingVideoDir();
         if (videoDir == null) {
             FLog.e(TAG, "Cannot create internal recording directory for active session");
             Toast.makeText(this, getString(R.string.toast_create_storage_dir_error), Toast.LENGTH_LONG).show();
@@ -6983,13 +6725,7 @@ public class RecordingService extends Service {
                     stopRecording();
                     return;
                 }
-                boolean isStreamingActive = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode =
-                        com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-                boolean isStreamAndSave = isStreamingActive
-                        && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_AND_SAVE);
-                androidx.documentfile.provider.DocumentFile pickedDir = resolveSafRecordingVideoDir(
-                        customUriString, isStreamAndSave);
+                androidx.documentfile.provider.DocumentFile pickedDir = resolveSafRecordingVideoDir(customUriString);
                 if (pickedDir == null || !pickedDir.canWrite()) {
                     FLog.e(TAG, "Segment rollover: Cannot write to selected custom directory");
                     stopRecording();
@@ -6997,7 +6733,7 @@ public class RecordingService extends Service {
                 }
                 String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
                 String segmentSuffix = String.format(Locale.US, "_part%d", nextSegmentNumber);
-                String filenamePrefix = isStreamAndSave ? "Stream_" : Constants.RECORDING_DIRECTORY + "_";
+                String filenamePrefix = Constants.RECORDING_DIRECTORY + "_";
                 String baseFilename = filenamePrefix + timestamp + segmentSuffix + ".mp4";
                 FLog.d(TAG, "Creating new segment file: " + baseFilename);
                 androidx.documentfile.provider.DocumentFile videoFile = pickedDir.createFile("video/mp4", baseFilename);
@@ -7011,14 +6747,6 @@ public class RecordingService extends Service {
                 currentSegmentPath = safUri.toString();
                 currentSegmentFile = null;
                 com.fadcam.ActiveRecordingStats.rolloverToNewSegment(null, safUri.toString(), RecordingService.this);
-                // Track SAF URI for STREAM_ONLY cleanup during segment rollover
-                boolean isStreamOnlyRollover = isStreamingActive
-                        && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-                if (isStreamOnlyRollover) {
-                    streamOnlySafUris.add(safUri.toString());
-                    FLog.i(TAG, "📺 STREAM_ONLY (SAF rollover): Tracking temp URI: " + safUri);
-                }
-                
                 // SAMSUNG SAF FIX: The GL pipeline now fully stops and releases the old muxer
                 // BEFORE invoking this callback (see GLRecordingPipeline.rolloverSegment()).
                 // That means muxer.close() has already returned synchronously — all
@@ -7083,8 +6811,6 @@ public class RecordingService extends Service {
             } else {
                 FLog.d(TAG, "Using internal storage for segment rollover");
                 
-                // Notify RemoteStreamManager about COMPLETED segment (before creating next)
-                // Fragments are delivered via FragmentedMp4MuxerWrapper callbacks (patched Media3)
                 if (currentSegmentFile != null && currentSegmentFile.exists()) {
                     long fileSize = currentSegmentFile.length();
                     FLog.i(TAG, "📹 SEGMENT ROLLOVER: #" + (nextSegmentNumber - 1) + 
@@ -7125,10 +6851,6 @@ public class RecordingService extends Service {
             FLog.e(TAG, "startRecording was called but state is " + recordingState + ", expected STARTING");
             return;
         }
-
-        // Clear STREAM_ONLY temp file tracking from any previous session
-        streamOnlyTempFiles.clear();
-        streamOnlySafUris.clear();
 
         // Clear runtime overrides so saved preferences take priority on fresh recording
         // session
@@ -7171,26 +6893,16 @@ public class RecordingService extends Service {
             ensureWatermarkInfoProvider();
 
             // Re-fetch streaming state and config at actual recording start
-            boolean isStreamingActive = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-            android.content.SharedPreferences fadcamPrefs = getSharedPreferences("FadCamPrefs", Context.MODE_PRIVATE);
-            
             // Resolution always from Recording Settings — presets only control bitrate + FPS
             String orientation = sharedPreferencesManager.getVideoOrientation();
             Size resolution = sharedPreferencesManager.getCameraResolution();
             int videoWidth  = resolution.getWidth();
             int videoHeight = resolution.getHeight();
             
-            int recordingBitrate = getVideoBitrate();  // Reads preset bitrate if streaming
+            int recordingBitrate = getVideoBitrate();
             int recordingFps = sharedPreferencesManager.getSpecificVideoFrameRate(sharedPreferencesManager.getCameraSelection());
-            if (isStreamingActive && recordingFps > 0) {
-                int streamFpsCap = fadcamPrefs.getInt("stream_fps_cap", -1);
-                if (streamFpsCap > 0 && recordingFps > streamFpsCap) {
-                    recordingFps = streamFpsCap;  // Apply FPS cap
-                }
-            }
             
-            FLog.i(TAG, "🎬 [RECORDING INITIALIZED] Res: " + videoWidth + "x" + videoHeight + " | FPS: " + recordingFps + " | Bitrate: " + (recordingBitrate/1_000_000) + "Mbps"
-                + (isStreamingActive ? " [STREAM PRESET ACTIVE]" : " [Normal recording]"));
+            FLog.i(TAG, "🎬 [RECORDING INITIALIZED] Res: " + videoWidth + "x" + videoHeight + " | FPS: " + recordingFps + " | Bitrate: " + (recordingBitrate/1_000_000) + "Mbps");
 
             // Get sensor orientation
             CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
@@ -7209,15 +6921,7 @@ public class RecordingService extends Service {
             }
             int videoBitrate = getVideoBitrate();
             
-            // Get camera's target framerate and apply streaming FPS cap if server is ON
             int videoFramerate = sharedPreferencesManager.getSpecificVideoFrameRate(cameraType);
-            if (isStreamingActive) {
-                int streamFpsCap = fadcamPrefs.getInt("stream_fps_cap", -1);
-                if (streamFpsCap > 0 && videoFramerate > streamFpsCap) {
-                    FLog.i(TAG, "[STREAM PRESET] Applying FPS cap at MediaRecorder: " + videoFramerate + " → " + streamFpsCap + "fps");
-                    videoFramerate = streamFpsCap;
-                }
-            }
             // Set splitSizeBytes to 0 if video splitting is disabled
             long splitSizeBytes = 0;
             if (sharedPreferencesManager.isVideoSplittingEnabled()) {
@@ -7237,13 +6941,8 @@ public class RecordingService extends Service {
                     stopSelf();
                     return;
                 }
-                boolean isSafStreamingActive = com.fadcam.streaming.RemoteStreamManager.getInstance().isStreamingEnabled();
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode = 
-                    com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-                boolean isStreamAndSave = isSafStreamingActive
-                        && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_AND_SAVE);
                 androidx.documentfile.provider.DocumentFile pickedDir = resolveSafRecordingVideoDir(
-                        customUriString, isStreamAndSave);
+                        customUriString, false);
                 if (pickedDir == null || !pickedDir.canWrite()) {
                     FLog.e(TAG, "Cannot write to selected custom directory");
                     Toast.makeText(this, getString(R.string.toast_cannot_write_custom_dir), Toast.LENGTH_LONG).show();
@@ -7251,7 +6950,7 @@ public class RecordingService extends Service {
                     return;
                 }
                 String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-                String filenamePrefix = isStreamAndSave ? "Stream_" : Constants.RECORDING_DIRECTORY + "_";
+                String filenamePrefix = Constants.RECORDING_DIRECTORY + "_";
                 String baseFilename = filenamePrefix + timestamp + ".mp4";
                 androidx.documentfile.provider.DocumentFile videoFile = pickedDir.createFile("video/mp4", baseFilename);
                 if (videoFile == null) {
@@ -7265,13 +6964,6 @@ public class RecordingService extends Service {
                 currentSegmentPath = safUri.toString();
                 currentSegmentFile = null;
                 com.fadcam.ActiveRecordingStats.setActiveSegment(null, safUri.toString());
-                // Track SAF URI for STREAM_ONLY cleanup (0-byte files created but no data written)
-                boolean isStreamOnlySaf = isStreamingActive
-                        && (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-                if (isStreamOnlySaf) {
-                    streamOnlySafUris.add(safUri.toString());
-                    FLog.i(TAG, "📺 STREAM_ONLY (SAF): Tracking temp URI for cleanup: " + safUri);
-                }
                 // -----
                 safRecordingPfd = getContentResolver().openFileDescriptor(safUri, "w");
                 if (safRecordingPfd == null) {
@@ -7320,21 +7012,9 @@ public class RecordingService extends Service {
                     FLog.d(TAG, "No location available for internal recording metadata");
                 }
                 
-                // Check streaming mode to determine output file handling
-                com.fadcam.streaming.RemoteStreamManager.StreamingMode streamingMode = 
-                    com.fadcam.streaming.RemoteStreamManager.getInstance().getStreamingMode();
-                boolean isStreamOnly = (streamingMode == com.fadcam.streaming.RemoteStreamManager.StreamingMode.STREAM_ONLY);
-                
-                File outputFile;
-                if (isStreamOnly) {
-                    // STREAM_ONLY: Use temporary file that will be deleted after recording
-                    outputFile = new File(getCacheDir(), "stream_temp_" + System.currentTimeMillis() + ".mp4");
-                    streamOnlyTempFiles.add(outputFile); // Track for cleanup
-                    FLog.i(TAG, "📺 STREAM_ONLY mode: Using temporary file: " + outputFile.getName());
-                } else {
-                    // STREAM_AND_SAVE: Write directly to final MP4 file (removed .tmp/remux logic)
-                    outputFile = getFinalOutputFile();
-                    FLog.d(TAG, "💾 STREAM_AND_SAVE mode: Writing directly to file: " + outputFile.getAbsolutePath());
+                File outputFile = getFinalOutputFile();
+                if (outputFile == null) {
+                    return;
                 }
                 
                 // Track initial segment file for streaming
@@ -7342,8 +7022,7 @@ public class RecordingService extends Service {
                 currentSegmentPath = outputFile.getAbsolutePath();
                 currentSegmentUriString = Uri.fromFile(outputFile).toString();
                 com.fadcam.ActiveRecordingStats.setActiveSegment(outputFile.getAbsolutePath(), null);
-                FLog.i(TAG, "[STORAGE] Internal mode: path=" + outputFile.getAbsolutePath()
-                        + " | streamOnly=" + isStreamOnly);
+                FLog.i(TAG, "[STORAGE] Internal mode: path=" + outputFile.getAbsolutePath());
                 
                 glRecordingPipeline = new com.fadcam.opengl.GLRecordingPipeline(this, watermarkInfoProvider, videoWidth,
                         videoHeight, videoFramerate, outputFile.getAbsolutePath(), splitSizeBytes, initialSegmentNumber,
@@ -7351,21 +7030,6 @@ public class RecordingService extends Service {
             }
 
             glRecordingPipeline.prepareSurfaces();
-
-            // Notify RemoteStreamManager that recording started
-            try {
-                if (currentSegmentFile != null) {
-                    com.fadcam.streaming.RemoteStreamManager.getInstance().startRecording(currentSegmentFile);
-                    FLog.i(TAG, "🎬 RemoteStreamManager notified: recording started for file: "
-                            + currentSegmentFile.getAbsolutePath());
-                } else {
-                    // SAF mode: no File object available, use flag-based notification
-                    com.fadcam.streaming.RemoteStreamManager.getInstance().startRecordingSaf();
-                }
-                
-            } catch (Exception e) {
-                FLog.e(TAG, "Failed to notify RemoteStreamManager about recording start", e);
-            }
 
             createCameraPreviewSession();
         } catch (Exception e) {

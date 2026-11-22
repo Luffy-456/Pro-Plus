@@ -18,7 +18,7 @@ public final class LocationFeedGate {
     /**
      * True if any user-enabled feature needs a live GPS feed. Critically
      * includes the extended sensor watermarks (speed/altitude/accuracy/compass)
-     * and weather, NOT just the "location watermark" toggle.
+     * NOT just the "location watermark" toggle.
      */
     public static boolean needsLocationData(SharedPreferencesManager prefs) {
         if (prefs == null) return false;
@@ -28,7 +28,6 @@ public final class LocationFeedGate {
                 || prefs.isSpeedEnabled()
                 || prefs.isAltitudeEnabled()
                 || prefs.isAccuracyEnabled()
-                || prefs.isCompassEnabled()
-                || prefs.isWeatherEnabled();
+                || prefs.isCompassEnabled();
     }
 }

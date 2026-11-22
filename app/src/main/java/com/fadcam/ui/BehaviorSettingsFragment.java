@@ -34,9 +34,7 @@ public class BehaviorSettingsFragment extends BaseFragment {
 
     private SharedPreferencesManager prefs;
     private TextView valueOnboardingState;
-    private TextView valueAutoUpdateState;
     private com.google.android.material.materialswitch.MaterialSwitch toggleOnboarding;
-    private com.google.android.material.materialswitch.MaterialSwitch toggleAutoUpdate;
 
     @Nullable
     @Override
@@ -50,9 +48,7 @@ public class BehaviorSettingsFragment extends BaseFragment {
         super.onViewCreated(view, savedInstanceState);
         prefs = SharedPreferencesManager.getInstance(requireContext());
         valueOnboardingState = view.findViewById(R.id.value_onboarding_state);
-        valueAutoUpdateState = view.findViewById(R.id.value_auto_update_state);
         toggleOnboarding = view.findViewById(R.id.toggle_onboarding);
-        toggleAutoUpdate = view.findViewById(R.id.toggle_auto_update);
     View back = view.findViewById(R.id.back_button);
     if (back != null) back.setOnClickListener(v -> OverlayNavUtil.dismiss(requireActivity()));
         if (toggleOnboarding != null) {
@@ -67,14 +63,6 @@ public class BehaviorSettingsFragment extends BaseFragment {
                 refreshValues();
             });
         }
-        if (toggleAutoUpdate != null) {
-            boolean enabled = prefs.sharedPreferences.getBoolean("auto_update_check_enabled", true);
-            toggleAutoUpdate.setChecked(enabled);
-            toggleAutoUpdate.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                prefs.sharedPreferences.edit().putBoolean("auto_update_check_enabled", isChecked).apply();
-                refreshValues();
-            });
-        }
         refreshValues();
     }
 
@@ -83,10 +71,6 @@ public class BehaviorSettingsFragment extends BaseFragment {
     private void refreshValues() {
         if (valueOnboardingState != null) {
             valueOnboardingState.setText(prefs.isShowOnboarding() ? getString(R.string.setting_enabled) : getString(R.string.setting_disabled));
-        }
-        if (valueAutoUpdateState != null) {
-            boolean enabled = prefs.sharedPreferences.getBoolean("auto_update_check_enabled", true);
-            valueAutoUpdateState.setText(enabled ? getString(R.string.setting_enabled) : getString(R.string.setting_disabled));
         }
     }
 

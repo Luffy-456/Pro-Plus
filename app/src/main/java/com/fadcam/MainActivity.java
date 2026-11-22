@@ -29,7 +29,6 @@ import androidx.appcompat.app.AppCompatDelegate;
 import androidx.fragment.app.Fragment;
 
 import com.fadcam.ui.RecordsFragment;
-import com.fadcam.ui.RemoteFragment;
 import com.fadcam.ui.HomeFragment;
 import com.fadcam.ui.FaditorMiniFragment;
 import com.fadcam.ui.SettingsHomeFragment;
@@ -280,33 +279,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             
-            // Handle Remote badge
-            boolean shouldShowRemoteBadge = NewFeatureManager.shouldShowBadge(this, "remote");
-            FLog.d("MainActivity", "updateFeatureBadgeVisibility: shouldShowRemoteBadge=" + shouldShowRemoteBadge);
-            
-            if (shouldShowRemoteBadge) {
-                // Show badge on Remote nav item
-                try {
-                    com.google.android.material.badge.BadgeDrawable badge = 
-                        bottomNavigationView.getOrCreateBadge(R.id.navigation_remote);
-                    badge.setVisible(true);
-                    badge.setText("NEW"); // Show "NEW" text instead of number
-                    badge.setBackgroundColor(0xFF4CAF50); // Green background
-                    badge.setBadgeTextColor(0xFFFFFFFF); // White text color
-                    FLog.d("MainActivity", "Badge shown for remote");
-                } catch (Exception e) {
-                    FLog.e("MainActivity", "Error creating badge", e);
-                }
-            } else {
-                // Remove badge from Remote nav item
-                try {
-                    bottomNavigationView.removeBadge(R.id.navigation_remote);
-                    FLog.d("MainActivity", "Badge removed for remote");
-                } catch (Exception e) {
-                    FLog.e("MainActivity", "Error removing badge", e);
-                }
-            }
-            
             // Handle Settings Nav Badge (separate from watermark option inside settings)
             boolean shouldShowSettingsNavBadge = NewFeatureManager.shouldShowBadge(this, "settings_nav");
             FLog.d("MainActivity", "updateFeatureBadgeVisibility: shouldShowSettingsNavBadge=" + shouldShowSettingsNavBadge);
@@ -376,15 +348,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Build/package identity for update-channel verification (beta vs stable).
-        try {
-            FLog.d("UpdateCheck", "App identity: applicationId=" + BuildConfig.APPLICATION_ID
-                    + " package=" + getPackageName()
-                    + " isBeta=" + BuildConfig.APPLICATION_ID.endsWith(".beta")
-                    + " versionName=" + BuildConfig.VERSION_NAME);
-        } catch (Exception e) {
-            FLog.w("UpdateCheck", "App identity log failed: " + e.getMessage());
-        }
         super.onCreate(savedInstanceState);
         swipeTouchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
 
@@ -635,6 +598,9 @@ public class MainActivity extends AppCompatActivity {
             // Configuration change / process death — FragmentManager restores all added fragments
             // We need to find which was the current one and ensure others are hidden
             int restoredPosition = savedInstanceState.getInt("current_fragment_position", 0);
+            if (restoredPosition == 2) {
+                restoredPosition = 0;
+            }
             androidx.fragment.app.FragmentManager fm = getSupportFragmentManager();
             
             // Hide all fragments except the current one, and restore currentFragmentPosition
@@ -665,8 +631,6 @@ public class MainActivity extends AppCompatActivity {
                 applyHomeNavIcon();
             } else if (itemId == R.id.navigation_records) {
                 targetPosition = 1;
-            } else if (itemId == R.id.navigation_remote) {
-                targetPosition = 2;
             } else if (itemId == R.id.navigation_faditor_mini) {
                 targetPosition = 3;
             } else if (itemId == R.id.navigation_settings) {
@@ -843,6 +807,9 @@ public class MainActivity extends AppCompatActivity {
                     // RTL-aware tab navigation: reverse direction in RTL layout
                     int direction = isRtl ? (dx > 0 ? 1 : -1) : (dx < 0 ? 1 : -1);
                     int target = currentFragmentPosition + direction;
+                    if (target == 2) {
+                        target += direction;
+                    }
                     if (target >= 0 && target <= 5) {
                         switchFragment(target, true);
                         swipeHandled = true;
@@ -1822,17 +1789,9 @@ public class MainActivity extends AppCompatActivity {
      * Called from onResume to ensure colors are correct when returning from background.
      */
     private void restoreBarColorsForCurrentTab() {
-        if (currentFragmentPosition == 2) {
-            // Remote tab uses black bars
-            setBottomNavColor(0xFF000000);
-            setStatusBarColor(0xFF000000);
-            setNavigationBarColor(0xFF000000);
-        } else {
-            // All other tabs use theme default colors
-            setBottomNavColor(0);
-            setStatusBarColor(0);
-            setNavigationBarColor(0);
-        }
+        setBottomNavColor(0);
+        setStatusBarColor(0);
+        setNavigationBarColor(0);
     }
 
     /**
@@ -2196,7 +2155,7 @@ public class MainActivity extends AppCompatActivity {
                 newFragment = new RecordsFragment();
                 break;
             case 2:
-                newFragment = new RemoteFragment();
+                newFragment = new com.fadcam.ui.HomeFragment();
                 break;
             case 3:
                 newFragment = new FaditorMiniFragment();
@@ -2257,7 +2216,7 @@ public class MainActivity extends AppCompatActivity {
         switch (position) {
             case 0: return R.id.navigation_home;
             case 1: return R.id.navigation_records;
-            case 2: return R.id.navigation_remote;
+            case 2: return -1;
             case 3: return R.id.navigation_faditor_mini;
             case 4: return R.id.navigation_settings;
             case 5: return R.id.navigation_lab;
